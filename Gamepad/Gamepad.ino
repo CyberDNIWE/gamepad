@@ -1,32 +1,114 @@
-// Jacek Fedorynski <jfedor@jfedor.org>
-// http://www.jfedor.org/
+// Debugging is a pain with no real step-through, so use these macroses to easily remove printouts from sources at will
+// Just coment out defines like DEBUG_PRINT_ENABLED to remove ALL printouts (suggested for final build)
+// Or each individual DEBUG_PRINT_XXXXX to remove specific ones. (useful for debugging)
 
-#include "HID.h"
+#define BUILD_SIMULATOR_NOUSB
+#define DEBUG_PRINT_ENABLED BUILD_SIMULATOR_NOUSB
+//#define BEBUG_PRINT_BUTTONS 
+//#define DEBUG_PRINT_BUTTONS_RELEASED
+//#define BEBUG_PRINT_DEBOUNCE_STATE 
+//#define BEBUG_PRINT_DPAD 
+#define DEBUG_PRINT_USB_REPORT 
+//#define DEBUG_PRINT_SOCD
+
+#ifdef BUILD_SIMULATOR_NOUSB
+  #include <HID.h>
+#endif
+
+// Debug printout macros
+#define REMOVED_FROM_SOURCE ;
+#ifdef DEBUG_PRINT_ENABLED
+# define debugPrintf(str) Serial.println(str);
+# ifdef BEBUG_PRINT_BUTTONS
+#   define debugPrintf_BUTTONS(str) Serial.println(str);
+# else
+#   define debugPrintf_BUTTONS(str) REMOVED_FROM_SOURCE
+# endif
+# ifdef BEBUG_PRINT_DEBOUNCE_STATE
+#   define debugPrintf_DEBOUNCE(str) Serial.println(str);
+# else
+#   define debugPrintf_DEBOUNCE(str) REMOVED_FROM_SOURCE
+# endif
+# ifdef BEBUG_PRINT_DPAD
+#   define debugPrintf_DPAD(str) Serial.println(str);
+# else
+#   define debugPrintf_DPAD(str) REMOVED_FROM_SOURCE
+# endif
+# ifdef DEBUG_PRINT_USB_REPORT
+#   define debugPrintf_USB(str) Serial.println(str);
+# else
+#   define debugPrintf_USB(str) REMOVED_FROM_SOURCE
+# endif
+# ifdef DEBUG_PRINT_SOCD
+#   define debugPrintf_SOCD(str) Serial.println(str);
+# else
+#   define debugPrintf_SOCD(str) REMOVED_FROM_SOURCE
+# endif
+# ifdef DEBUG_PRINT_BUTTONS_RELEASED
+#   define debugPrintf_BUTTONS_RELEASED(str) Serial.println(str);
+# else
+#   define debugPrintf_BUTTONS_RELEASED(str) REMOVED_FROM_SOURCE
+# endif
+#else
+# define debugPrintf(str)            REMOVED_FROM_SOURCE
+# define debugPrintf_BUTTONS(str)    REMOVED_FROM_SOURCE
+# define debugPrintf_DEBOUNCE(str)   REMOVED_FROM_SOURCE
+# define debugPrintf_DPAD(str)       REMOVED_FROM_SOURCE
+# define debugPrintf_USB(str)        REMOVED_FROM_SOURCE
+#define  debugPrintf_SOCD(str)       REMOVED_FROM_SOURCE
+#define debugPrintf_BUTTONS_RELEASED REMOVED_FROM_SOURCE
+#endif
+ 
+// Default debounce amount in ms
+#define DEBOUNCE_DEFAULT_MS 5
+
 
 // I used an Arduino Pro Micro board, but it should work with any ATmega32U4-based board, just set the right pins below.
 // If you want L3/R3, the PS button or analog sticks, you'll need to add them.
 
-#define PIN_UP        2
-#define PIN_DOWN      3
-#define PIN_LEFT      4
-#define PIN_RIGHT     5
-#define PIN_CROSS     6
-#define PIN_CIRCLE    7
-#define PIN_TRIANGLE  8
-#define PIN_SQUARE    9
-#define PIN_L1        10
-#define PIN_L2        14
-#define PIN_R1        16
-#define PIN_R2        15
-#define PIN_SELECT    18
-#define PIN_START     19
-
-int stickMode = 0; // 0 = dpad, 1 = left stick
+namespace board_config
+{
+  // Adjust your pins here:
+  enum enPins_Buttons : unsigned char 
+  {
+    //D-pad
+    PIN_UP        = 2,
+    PIN_DOWN      = 3,
+    PIN_LEFT      = 4,
+    PIN_RIGHT     = 5,
+    //Others
+    PIN_CROSS     = 6,
+    PIN_CIRCLE    = 7,
+    PIN_TRIANGLE  = 8,
+    PIN_SQUARE    = 9,
+    PIN_L1        = 10,
+    // For Mini Pro:
+    /*
+    PIN_L2        = 14,
+    PIN_R1        = 16,
+    PIN_R2        = 15,
+    PIN_SELECT    = 18,
+    PIN_START     = 19
+    //*/
+    
+    // For UNO:    
+    ///*
+    PIN_L2        = 11,
+    PIN_R1        = 12,
+    PIN_R2        = 13,
+    // At this point we're out of digital pins
+    PIN_SELECT    = 14, // A0
+    PIN_START     = 15  // A1
+    //*/
+  };
+};
+using enPinsBUTTONS = board_config::enPins_Buttons;
 
 // HID report descriptor taken from a HORI Fighting Stick V3
 // works out of the box with PC and PS3
 // as dumped by usbhid-dump and parsed by https://eleccelerator.com/usbdescreqparser/
-static const uint8_t hidReportDescriptor[] PROGMEM = {
+static const uint8_t hidReportDescriptor[] PROGMEM =
+{
   0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
   0x09, 0x05,        // Usage (Game Pad)
   0xA1, 0x01,        // Collection (Application)
@@ -95,7 +177,34 @@ static const uint8_t hidReportDescriptor[] PROGMEM = {
   0xC0,              // End Collection
 };
 
-typedef struct {
+enum bfButtonHID : uint16_t
+{
+  HID_SQUARE     = (1u << 0),
+  HID_CROSS      = (1u << 1),
+  HID_CIRCLE     = (1u << 2),     
+  HID_TRIANGLE   = (1u << 3),       
+  HID_L1         = (1u << 4), 
+  HID_R1         = (1u << 5), 
+  HID_L2         = (1u << 6), 
+  HID_R2         = (1u << 7), 
+  HID_SELECT     = (1u << 8),     
+  HID_START      = (1u << 9),  
+  HID_L3         = (1u << 10), 
+  HID_R3         = (1u << 11),
+  HID_PS         = (1u << 12)
+};
+
+enum DpadHID : uint8_t
+{
+  DPAD_UP       = 0x00, //0b00000000
+  DPAD_DOWN     = 0x04, //0b00000100
+  DPAD_LEFT     = 0x06, //0b00000110
+  DPAD_RIGHT    = 0x02, //0b00000010
+  DPAD_NEUTRAL  = 0x0f  //0b11111111
+};
+
+struct hid_report_t
+{
   uint16_t buttons; // bits: 0 = square, 1 = cross, 2 = circle, 3 = triangle,
                     // 4 = L1, 5 = R1, 6 = L2, 7 = R2, 8 = select, 9 = start, 12 = PS
                     // 10 = L3?, 11 = R3?
@@ -120,141 +229,1013 @@ typedef struct {
   uint16_t accelerometerYAxis; // 10 bits
   uint16_t accelerometerZAxis; // 10 bits
   uint16_t gyroscopeAxis; // 10 bits
-} hid_report_t;
+};
 
-hid_report_t report;
-hid_report_t prevReport;
-
-void dpad(bool up, bool down, bool left, bool right) {
-  if (up && down) {
-    up = down = false;
-  }
-  if (left && right) {
-    left = right = false;
-  }
-
-  switch (stickMode) {
-    case 0:
-      if (up && !right && !left) report.dpadHat = 0;
-      else if (up && right) report.dpadHat = 1;
-      else if (right && !up && !down) report.dpadHat = 2;
-      else if (right && down) report.dpadHat = 3;
-      else if (down && !right && !left) report.dpadHat = 4;
-      else if (down && left) report.dpadHat = 5;
-      else if (left && !down && !up) report.dpadHat = 6;
-      else if (left && up) report.dpadHat = 7;
-      else report.dpadHat = 0x0f;
-
-      report.dpadRightAxis = right ? 0xff : 0x00;
-      report.dpadLeftAxis = left ? 0xff : 0x00;
-      report.dpadUpAxis = up ? 0xff : 0x00;
-      report.dpadDownAxis = down ? 0xff : 0x00;
-      break;
-    case 1:
-      report.leftStickXAxis = left ? 0x00 : (right ? 0xFF : 0x80);
-      report.leftStickYAxis = up ? 0x00 : (down ? 0xFF : 0x80);
-      break;
-  }
+bool operator!=(const hid_report_t& lhs, const hid_report_t& rhs) noexcept
+{
+  return memcmp(&lhs, &rhs, sizeof(rhs));
+}
+bool operator==(const hid_report_t& lhs, const hid_report_t& rhs) noexcept
+{
+  return !(lhs != rhs);
 }
 
-void sendReport() {
-  if (memcmp(&prevReport, &report, sizeof(report))) {
-    HID().SendReport(1, &report, sizeof(report));
-    memcpy(&prevReport, &report, sizeof(report));
-  }
+
+constexpr hid_report_t _make_report() noexcept
+{
+  return
+  {
+    /* buttons;              =    */  0x00,
+    /* dpadHat;              =    */  0x0f,
+    /* leftStickXAxis;       =    */  0x80,
+    /* leftStickYAxis;       =    */  0x80,
+    /* rightStickXAxis;      =    */  0x80,
+    /* rightStickYAxis;      =    */  0x80,
+    /* dpadRightAxis;        =    */  0x00,
+    /* dpadLeftAxis;         =    */  0x00,
+    /* dpadUpAxis;           =    */  0x00,
+    /* dpadDownAxis;         =    */  0x00,
+    /* triangleAxis;         =    */  0x00,
+    /* circleAxis;           =    */  0x00,
+    /* crossAxis;            =    */  0x00,
+    /* squareAxis;           =    */  0x00,
+    /* L1Axis;               =    */  0x00,
+    /* L2Axis;               =    */  0x00,
+    /* R1Axis;               =    */  0x00,
+    /* R2Axis;               =    */  0x00,
+    /* accelerometerXAxis;   =    */  0x02, // not sure why 0x02, but that's what HORI Fighting Stick V3 sends
+    /* accelerometerYAxis;   =    */  0x02, // not sure why 0x02, but that's what HORI Fighting Stick V3 sends
+    /* accelerometerZAxis;   =    */  0x02, // not sure why 0x02, but that's what HORI Fighting Stick V3 sends
+    /* gyroscopeAxis;        =    */  0x02  // not sure why 0x02, but that's what HORI Fighting Stick V3 sends
+  };
 }
 
-void setup() {
-  static HIDSubDescriptor node(hidReportDescriptor, sizeof(hidReportDescriptor));
-  HID().AppendDescriptor(&node);
+class Reporter
+{
+public:
+  hid_report_t m_report;
+  hid_report_t m_prevReport;
 
-  pinMode(PIN_UP, INPUT_PULLUP);
-  pinMode(PIN_DOWN, INPUT_PULLUP);
-  pinMode(PIN_LEFT, INPUT_PULLUP);
-  pinMode(PIN_RIGHT, INPUT_PULLUP);
-  pinMode(PIN_CROSS, INPUT_PULLUP);
-  pinMode(PIN_CIRCLE, INPUT_PULLUP);
-  pinMode(PIN_TRIANGLE, INPUT_PULLUP);
-  pinMode(PIN_SQUARE, INPUT_PULLUP);
-  pinMode(PIN_L1, INPUT_PULLUP);
-  pinMode(PIN_L2, INPUT_PULLUP);
-  pinMode(PIN_R1, INPUT_PULLUP);
-  pinMode(PIN_R2, INPUT_PULLUP);
-  pinMode(PIN_SELECT, INPUT_PULLUP);
-  pinMode(PIN_START, INPUT_PULLUP);
+  constexpr Reporter(): m_report(_make_report()), m_prevReport(_make_report())
+  {}
 
-  // if left is held when plugged in, switch to left stick emulation mode
-  if (digitalRead(PIN_LEFT) == LOW) {
-    stickMode = 1;
+  void resetReport()
+  {
+    m_report.buttons = 0x00;
+    m_report.triangleAxis = 0x00;
+    m_report.circleAxis = 0x00;
+    m_report.crossAxis = 0x00;
+    m_report.squareAxis = 0x00;
+    m_report.L1Axis = 0x00;
+    m_report.L2Axis = 0x00;
+    m_report.R1Axis = 0x00;
+    m_report.R2Axis = 0x00;
   }
 
-  memset(&report, 0, sizeof(report));
-  report.dpadHat = 0x0f;
-  report.accelerometerXAxis = 0x02; // not sure why 0x02, but that's what HORI Fighting Stick V3 sends
-  report.accelerometerYAxis = 0x02;
-  report.accelerometerZAxis = 0x02;
-  report.gyroscopeAxis = 0x02;
-  report.leftStickXAxis = 0x80;
-  report.leftStickYAxis = 0x80;
-  report.rightStickXAxis = 0x80;
-  report.rightStickYAxis = 0x80;
-  memcpy(&prevReport, &report, sizeof(report));
+  void sendReportIfNeeded()
+  {
+    if(m_report != m_prevReport)
+    {
+      m_prevReport = m_report;
+#     ifndef BUILD_SIMULATOR_NOUSB
+      HID().SendReport(1, &m_report, sizeof(m_report));
+#     endif
+      debugPrintf_USB("Sending NEW REPORT!");
+    }
+  }
+
+  hid_report_t& getReportBuffer() noexcept
+  {
+    return m_report;
+  }
+};
+
+
+// Setting up and checking pins helpers
+template<typename PIN>
+inline void setupButtonPin(PIN pin) noexcept
+{
+  debugPrintf("Btn setup");
+  pinMode(pin, INPUT_PULLUP);
 }
 
-void loop() {
-  report.buttons = 0x00;
-  report.triangleAxis = 0x00;
-  report.circleAxis = 0x00;
-  report.crossAxis = 0x00;
-  report.squareAxis = 0x00;
-  report.L1Axis = 0x00;
-  report.L2Axis = 0x00;
-  report.R1Axis = 0x00;
-  report.R2Axis = 0x00;
+// Instead of repeating "digitalRead(pin) == LOW" use this:
+template<typename PIN>
+inline bool buttonIsPressed(PIN pin) noexcept
+{
+  return digitalRead(pin) == LOW;
+}
 
-  dpad(digitalRead(PIN_UP) == LOW,
-       digitalRead(PIN_DOWN) == LOW,
-       digitalRead(PIN_LEFT) == LOW,
-       digitalRead(PIN_RIGHT) == LOW);
 
-  if (digitalRead(PIN_SQUARE) == LOW) {
-    report.buttons |= 1 << 0;
-    report.squareAxis = 0xff;
-  }
-  if (digitalRead(PIN_CROSS) == LOW) {
-    report.buttons |= 1 << 1;
-    report.crossAxis = 0xff;
-  }
-  if (digitalRead(PIN_CIRCLE) == LOW) {
-    report.buttons |= 1 << 2;
-    report.circleAxis = 0xff;
-  }
-  if (digitalRead(PIN_TRIANGLE) == LOW) {
-    report.buttons |= 1 << 3;
-    report.triangleAxis = 0xff;
-  }
-  if (digitalRead(PIN_L1) == LOW) {
-    report.buttons |= 1 << 4;
-    report.L1Axis = 0xff;
-  }
-  if (digitalRead(PIN_R1) == LOW) {
-    report.buttons |= 1 << 5;
-    report.R1Axis = 0xff;
-  }
-  if (digitalRead(PIN_L2) == LOW) {
-    report.buttons |= 1 << 6;
-    report.L2Axis = 0xff;
-  }
-  if (digitalRead(PIN_R2) == LOW) {
-    report.buttons |= 1 << 7;
-    report.R2Axis = 0xff;
-  }
-  if (digitalRead(PIN_SELECT) == LOW) {
-    report.buttons |= 1 << 8;
-  }
-  if (digitalRead(PIN_START) == LOW) {
-    report.buttons |= 1 << 9;
-  }
+enum enStickMode : unsigned char 
+{
+  DPAD = 0,
+  LEFT_STICK = 1
+};
 
-  sendReport();
+template<typename TRGT, typename BF>
+inline void setBit(TRGT& target, BF mask) noexcept
+{
+  target |= mask;
+}
+
+template<typename TRGT, typename BF>
+inline void clearBit(TRGT& target, BF mask) noexcept
+{
+  target &= ~mask;
+}
+
+// Few helper templates to abstract bit operations even more
+template<typename BTN, typename BF, typename AXIS>
+inline void regButtonPressed(BTN& b, AXIS& a, BF mask) noexcept
+{
+  setBit(b, mask);
+  a = 0xff;
+}
+
+template<typename BTN, typename BF, typename AXIS>
+inline void regButtonReleased(BTN& b, AXIS& a, BF mask) noexcept
+{
+  clearBit(b, mask);
+  a = 0x00;
+}
+
+template<typename BTN, typename BF>
+inline void regButtonPressed(BTN& b, BF mask) noexcept
+{
+  setBit(b, mask);
+}
+
+template<typename BTN, typename BF>
+inline void regButtonReleased(BTN& b, BF mask) noexcept
+{
+  clearBit(b, mask);
+}
+
+
+// Ignore _inner namespace, it's for poor man's array
+namespace _inner
+{
+ template<typename DT>
+ struct MyArray
+ {
+   const DT** data;
+   const size_t size;
+ };
+
+ template <typename T, size_t N>
+ constexpr size_t array_size(const T(&)[N]) noexcept { return N; }
+};
+
+class iGatherable
+{
+  public:
+    constexpr iGatherable() noexcept = default;
+    virtual void gather(hid_report_t& target) const noexcept = 0;  
+};
+
+class iReportable
+{
+  public:
+    constexpr iReportable() noexcept = default;
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept = 0;
+};
+
+class iGatherableANDiReportable : public iGatherable, public iReportable
+{
+  public:
+    constexpr iGatherableANDiReportable() = default;
+};
+
+class iInitable
+{
+  public:
+    constexpr iInitable() = default;
+    
+    virtual void init() noexcept = 0;
+};
+
+template<typename PT, typename RT>
+class Node : public iInitable
+{
+  public:
+    constexpr Node() noexcept = default;
+
+    
+    virtual ~Node() noexcept = default;
+    //{
+      //del();
+    //}
+
+    //virtual void init() noexcept = 0;
+    virtual void gather(RT& target) const noexcept = 0;
+
+    virtual void initChain() noexcept
+    {
+      //debugPrintf("Init")
+      init();
+      if(m_next)
+      {
+        //debugPrintf("Initing next chain!")
+        m_next->initChain();
+      }
+    }
+
+    void advance(RT& rep) const noexcept
+    {
+      if(m_next)
+      {
+        m_next->gather(rep);
+      }
+    }
+
+    PT* append(PT* next) noexcept
+    {
+      if(next)
+      {
+        if(m_next)
+        {
+          m_next->append(next);
+          //debugPrintf("Appended TO next.")
+        }
+        else
+        {
+          m_next = { next };
+          //debugPrintf("Appended AS next.")
+        }
+      }
+      return this;
+    }
+
+    template<typename ARR>
+    inline void appendMultiple(const ARR& arr) noexcept
+    {
+      for(size_t i = 0; i < arr.size; ++i)
+      {
+        PT* cur = arr.data[i];
+        if(cur)
+        {
+          append(cur);
+        }
+      }
+    }
+  protected:
+    inline void del() noexcept
+    {
+      if(m_next)
+      {
+        delete m_next;
+      }
+    }
+
+    PT* m_next = nullptr;
+};
+
+class HidReportable : public Node<HidReportable, hid_report_t>, public iGatherableANDiReportable
+{
+  public:
+    constexpr HidReportable() noexcept = default;
+    constexpr HidReportable(bool updates) noexcept:  Node<HidReportable, hid_report_t>(), m_updateIsNeeded(updates)
+    {}
+
+    virtual ~HidReportable() = default;
+
+    virtual void gather(hid_report_t& target) const noexcept override
+    {
+      if(updateIsNeeded())
+      {
+        reportTo(target);
+      }
+      advance(target);
+    }
+
+    virtual bool updateIsNeeded() const noexcept 
+    {
+      return m_updateIsNeeded;
+    };
+
+  protected:
+    bool m_updateIsNeeded = true;
+  
+  private:
+    //virtual void reportTo(hid_report_t& target) const noexcept = 0;
+};
+
+class ButtonBase : public HidReportable
+{
+  public:
+    constexpr ButtonBase(enPinsBUTTONS pin) noexcept : m_pin(pin)
+    {
+      //setupButtonPin(m_pin);
+    }
+    virtual ~ButtonBase() = default;
+    virtual void init() noexcept override
+    {
+      setupButtonPin(m_pin);
+    }
+
+    virtual bool btnIsPressed() const noexcept
+    {
+      return buttonIsPressed(m_pin);
+    }
+
+  
+  protected:
+    const enPinsBUTTONS m_pin;
+};
+
+class Debouncer
+{
+  public:
+    enum STATE
+    {
+      DEBOUNCE_PRESSED,
+      PREPARE_DEBOUNCE_PRESSED,
+      RESET,
+      PREPARE_DEBOUNCE_OPENING,
+      DEBOUNCE_OPENING
+    };
+
+    constexpr Debouncer(unsigned long debounceTime) noexcept : m_debounceTime(debounceTime)
+    {}    
+
+    bool debounce(bool actuallyPressed) noexcept
+    {
+      auto now = getTimeSinceStart();
+      bool timespanEnded = isResponsive(now);
+      bool ret = false;
+
+      switch(m_debouncePhase)
+      {
+        case STATE::DEBOUNCE_PRESSED:
+        {
+          if(!m_pressTime && actuallyPressed && timespanEnded)
+          {
+            debugPrintf_DEBOUNCE("1");
+            m_pressTime = now;
+            m_debouncePhase = STATE::PREPARE_DEBOUNCE_PRESSED;
+            ret = true;
+          }
+          break;
+        }
+        
+        case STATE::PREPARE_DEBOUNCE_OPENING:
+        {          
+          if(!actuallyPressed)
+          {
+            debugPrintf_DEBOUNCE("2"); 
+            m_pressTime = now;
+            m_debouncePhase = STATE::DEBOUNCE_OPENING;
+            ret = false;
+          }
+          else
+          {
+            ret = true;
+          }
+
+          //ret = false;
+          break;
+        }
+
+        case STATE::DEBOUNCE_OPENING:
+        {
+          if(timespanEnded && !actuallyPressed)
+          {
+            debugPrintf_DEBOUNCE("3");
+            m_debouncePhase = STATE::RESET;
+          }
+          else
+          {
+            debugPrintf_DEBOUNCE("4");
+          }
+
+          ret = false;
+          break;
+        }
+
+        case STATE::PREPARE_DEBOUNCE_PRESSED:
+        {
+          if(actuallyPressed && timespanEnded)
+          {
+            debugPrintf_DEBOUNCE("5");
+            m_debouncePhase = STATE::PREPARE_DEBOUNCE_OPENING;
+            //ret = false;
+            ret = true;
+          }
+          else if(timespanEnded)
+          {
+            debugPrintf_DEBOUNCE("6");
+            m_debouncePhase = STATE::RESET;
+            ret = false;
+          }
+          else
+          {
+            debugPrintf_DEBOUNCE("7");
+            ret = true;
+          }
+
+          //ret = false;
+          break;
+        }
+
+        case STATE::RESET:
+        {          
+          if(timespanEnded)
+          {
+            debugPrintf_DEBOUNCE("8");
+            m_pressTime = 0;
+            m_debouncePhase = STATE::DEBOUNCE_PRESSED;
+          }
+
+          ret = false;
+          break;
+        }
+
+        default: break;
+      }
+      
+      return ret;
+    }    
+    
+  protected:
+    virtual unsigned long getTimeSinceStart() const noexcept
+    {
+      return millis();
+    }
+
+    inline bool isResponsive(unsigned long current) const noexcept
+    {
+      return current > (m_pressTime + m_debounceTime);
+    }
+
+    STATE m_debouncePhase              = STATE::RESET;
+    const unsigned long m_debounceTime = 0;
+    unsigned long m_pressTime          = 0;
+};
+
+class ButtonDebounced : public ButtonBase
+{
+  public:
+    constexpr ButtonDebounced(enPinsBUTTONS pin, unsigned long debounceTime = DEBOUNCE_DEFAULT_MS) noexcept : 
+    ButtonBase(pin), m_debouncer(debounceTime)
+    {}
+    virtual ~ButtonDebounced() = default;
+
+    virtual bool btnIsPressed() const noexcept override
+    {
+      return m_debouncer.debounce(this->::ButtonBase::btnIsPressed());
+    }
+
+  protected:    
+    Debouncer m_debouncer;
+};
+
+//========== D-pad buttons ==============//
+class Btn_Dpad : public ButtonDebounced
+{
+  public:
+    constexpr Btn_Dpad(enPinsBUTTONS pin, unsigned long debounceMS = DEBOUNCE_DEFAULT_MS) : ButtonDebounced(pin, debounceMS)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {}
+};
+
+namespace cleaner_strategy
+{
+  struct SOCD_CleaningStrategy
+  {
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept = 0;
+  };
+
+  struct None : public SOCD_CleaningStrategy
+  {
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept 
+    {
+      debugPrintf_SOCD("NO SOCD APPLIED!");
+    };
+  };
+
+  struct TournamentLegal : public SOCD_CleaningStrategy
+  {
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept override
+    {
+      if(up && down)
+      {        
+        down = false;
+        debugPrintf_SOCD("Tournament legal SOCD: UP + DOWN = UP");
+      }
+      if(left && right)
+      {        
+        left = right = false;
+        debugPrintf_SOCD("Tournament legal SOCD: LEFT + RIGHT = NEUTRAL");
+      }
+    }
+  };
+
+  struct AllNeutral : public SOCD_CleaningStrategy
+  {
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept override
+    {      
+      if(up && down)
+      {        
+        up = down = false;
+        debugPrintf_SOCD("All neutral SOCD: UP + DOWN = NEUTRAL");
+      }
+      if(left && right)
+      {        
+        left = right = false;
+        debugPrintf_SOCD("All neutral SOCD: LEFT + RIGHT = NEUTRAL");
+      }
+    }
+  };
+
+  //Todo: Composite strategy switcher
+};
+
+
+#define _DPAD_CTOR_PARAMS cleaner_strategy::SOCD_CleaningStrategy* cleaner = &Dpad::noCleaning, \
+enPinsBUTTONS pin_up = enPinsBUTTONS::PIN_UP,       unsigned long btn_up_debuonceMs    = DEBOUNCE_DEFAULT_MS, \
+enPinsBUTTONS pin_down = enPinsBUTTONS::PIN_DOWN,   unsigned long btn_down_debuonceMs  = DEBOUNCE_DEFAULT_MS, \
+enPinsBUTTONS pin_left = enPinsBUTTONS::PIN_LEFT,   unsigned long btn_left_debuonceMs  = DEBOUNCE_DEFAULT_MS, \
+enPinsBUTTONS pin_right = enPinsBUTTONS::PIN_RIGHT, unsigned long btn_right_debuonceMs = DEBOUNCE_DEFAULT_MS
+
+// Composit(s) dpad buttons, optionally uses SOCD cleaning
+class Dpad : public HidReportable
+{
+  public:
+    const static cleaner_strategy::None noCleaning = {};
+
+    constexpr Dpad(_DPAD_CTOR_PARAMS) noexcept : HidReportable(),
+    m_btn_up(pin_up, btn_up_debuonceMs),       m_btn_down(pin_down, btn_down_debuonceMs),
+    m_btn_left(pin_left, btn_left_debuonceMs), m_btn_right(pin_right, btn_right_debuonceMs),
+    m_cleaner(cleaner)
+    {}
+
+    virtual void init() noexcept override
+    {
+      m_btn_up.initChain();
+      m_btn_down.initChain();
+      m_btn_left.initChain();
+      m_btn_right.initChain();
+    }
+
+  protected:
+    const cleaner_strategy::SOCD_CleaningStrategy*  m_cleaner;
+    const Btn_Dpad                     m_btn_up;
+    const Btn_Dpad                     m_btn_down;
+    const Btn_Dpad                     m_btn_left;
+    const Btn_Dpad                     m_btn_right;
+  
+    virtual void reportTo(hid_report_t& target) const noexcept override
+    {
+      // Gather all button states (automatically debounces, no need to worry here)
+      bool up     = m_btn_up.btnIsPressed();
+      bool down   = m_btn_down.btnIsPressed();
+      bool left   = m_btn_left.btnIsPressed();
+      bool right  = m_btn_right.btnIsPressed();
+
+      // Clean states up according to cleaning strategy
+      m_cleaner->clean(up, down, left, right);
+      
+      // Fill report
+      if(up && !right && !left) 
+      {
+        target.dpadHat = 0;
+        debugPrintf_DPAD("Pressed d-pad: ↑");
+      }
+      else if(up && right)
+      {
+        target.dpadHat = 1;
+        debugPrintf_DPAD("Pressed d-pad: ↗");
+      }
+      else if(right && !up && !down)
+      {        
+        target.dpadHat = 2;
+        debugPrintf_DPAD("Pressed d-pad: →");
+      }
+      else if(right && down)
+      {
+        target.dpadHat = 3;
+        debugPrintf_DPAD("Pressed d-pad: ↘");
+      }
+      else if(down && !right && !left)
+      {
+        target.dpadHat = 4;
+        debugPrintf_DPAD("Pressed d-pad: ↓");
+      }
+      else if(down && left)
+      {
+        target.dpadHat = 5;
+        debugPrintf_DPAD("Pressed d-pad: ↙");
+      }
+      else if(left && !down && !up)
+      {
+        target.dpadHat = 6;
+        debugPrintf_DPAD("Pressed d-pad: ←");
+      }
+      else if(left && up)
+      {
+        target.dpadHat = 7;
+        debugPrintf_DPAD("Pressed d-pad: ↖");
+      }
+      else
+      {
+        //debugPrintf_DPAD("Pressed d-pad: NEUTRAL");
+        target.dpadHat = 0x0f;
+      }
+
+      // Not sure if needed, but original had these so might as well
+      target.dpadRightAxis = right ? 0xff : 0x00;
+      target.dpadLeftAxis  = left  ? 0xff : 0x00;
+      target.dpadUpAxis    = up    ? 0xff : 0x00;
+      target.dpadDownAxis  = down  ? 0xff : 0x00;
+
+    }
+};
+#undef _DPAD_CTOR_PARAMS
+
+//========== Concrete buttons ==============//
+#pragma region CONCRETE_BUTTONS_DEFINITION
+class Btn_X : public ButtonDebounced
+{
+  public:
+    constexpr Btn_X(enPinsBUTTONS pin = enPinsBUTTONS::PIN_CROSS) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_CROSS;
+      auto& axis    = target.crossAxis;
+      auto& buttons = target.buttons;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  X");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  X");
+      }      
+    }
+};
+
+class Btn_SQUARE : public ButtonDebounced
+{
+  public:
+    constexpr Btn_SQUARE(enPinsBUTTONS pin = enPinsBUTTONS::PIN_SQUARE) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_SQUARE;
+      auto& axis    = target.squareAxis;
+      auto& buttons = target.buttons;
+
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  □");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  □");
+      }
+
+      
+    }
+};
+
+class Btn_CIRCLE : public ButtonDebounced
+{
+  public:
+    constexpr Btn_CIRCLE(enPinsBUTTONS pin = enPinsBUTTONS::PIN_CIRCLE) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_CIRCLE;
+      auto& axis    = target.circleAxis;
+      auto& buttons = target.buttons;
+
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  o");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  o");
+      }
+
+      
+    }
+};
+
+class Btn_TRIANGLE : public ButtonDebounced
+{
+  public:
+    constexpr Btn_TRIANGLE(enPinsBUTTONS pin = enPinsBUTTONS::PIN_TRIANGLE) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_TRIANGLE;
+      auto& axis    = target.triangleAxis;
+      auto& buttons = target.buttons;
+
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  △");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  △");
+      }    
+    }
+};
+
+class Btn_L1 : public ButtonDebounced
+{
+  public:
+    constexpr Btn_L1(enPinsBUTTONS pin = enPinsBUTTONS::PIN_L1) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_L1;
+      auto& axis    = target.L1Axis;
+      auto& buttons = target.buttons;
+
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  L1");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  L1");
+      }    
+    }
+};
+
+class Btn_R1 : public ButtonDebounced
+{
+  public:
+    constexpr Btn_R1(enPinsBUTTONS pin = enPinsBUTTONS::PIN_R1) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_R1;
+      auto& buttons = target.buttons;
+      auto& axis    = target.R1Axis;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  R1");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  R1");
+      }    
+    }
+};
+
+class Btn_L2 : public ButtonDebounced
+{
+  public:
+    constexpr Btn_L2(enPinsBUTTONS pin = enPinsBUTTONS::PIN_L2) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_L2;
+      auto& buttons = target.buttons;
+      auto& axis    = target.L2Axis;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  L2");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  L2");
+      }    
+    }
+};
+
+class Btn_R2 : public ButtonDebounced
+{
+  public:
+    constexpr Btn_R2(enPinsBUTTONS pin = enPinsBUTTONS::PIN_R2) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_R2;
+      auto& buttons = target.buttons;
+      auto& axis    = target.R2Axis;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, axis, mask);
+        debugPrintf_BUTTONS("Button Pressed:  R2");
+      }
+      else
+      {
+        regButtonReleased(buttons, axis, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  R2");
+      }    
+    }
+};
+
+class Btn_SELECT : public ButtonDebounced
+{
+  public:
+    constexpr Btn_SELECT(enPinsBUTTONS pin = enPinsBUTTONS::PIN_SELECT) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_SELECT;
+      auto& buttons = target.buttons;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, mask);
+        debugPrintf_BUTTONS("Button Pressed:  SELECT");
+      }
+      else
+      {
+        regButtonReleased(buttons, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  SELECT");
+      }    
+    }
+};
+
+class Btn_START : public ButtonDebounced
+{
+  public:
+    constexpr Btn_START(enPinsBUTTONS pin = enPinsBUTTONS::PIN_START) noexcept : ButtonDebounced(pin)
+    {}
+
+  protected:
+    virtual void reportTo(hid_report_t& target) const noexcept 
+    {
+      constexpr auto mask = bfButtonHID::HID_START;
+      auto& buttons = target.buttons;
+      
+      if(btnIsPressed())
+      {
+        regButtonPressed(buttons, mask);
+        debugPrintf_BUTTONS("Button Pressed:  START");
+      }
+      else
+      {
+        regButtonReleased(buttons, mask);
+        debugPrintf_BUTTONS_RELEASED("Button Unpressed:  START");
+      }    
+    }
+};
+
+#pragma endregion
+//==========================================//
+
+class Root : public Node<HidReportable, hid_report_t>, public iGatherable
+{
+  public:
+    constexpr Root() noexcept = default;
+
+    virtual void init() noexcept override
+    {};
+    
+    virtual void gather(hid_report_t& target) const noexcept override
+    {
+      advance(target);
+    }
+};
+
+class Gamepad : public Root
+{
+  public:
+    constexpr Gamepad() noexcept : m_usbReporter()
+    {}
+
+    void pollEverything() const noexcept
+    {
+      gather(m_usbReporter.getReportBuffer());
+      m_usbReporter.sendReportIfNeeded();
+    }
+
+  protected:
+    Reporter m_usbReporter;
+
+};
+
+
+
+
+
+namespace socd_strategies
+{
+  using namespace cleaner_strategy;
+  static const cleaner_strategy::AllNeutral allNeutral = {};
+  static const cleaner_strategy::TournamentLegal tournamentLegal = {};
+
+  /*
+  constexpr SOCD_CleaningStrategy* _strategies[] PROGMEM = 
+  {
+    &allNeutral,
+    &tournamentLegal
+  };
+  */
+
+};
+
+namespace buttons_storage
+{
+  static const auto X         = Btn_X();
+  static const auto Square    = Btn_SQUARE();
+  static const auto Sircle    = Btn_CIRCLE();
+  static const auto Triangle  = Btn_TRIANGLE();
+  static const auto L1        = Btn_L1();
+  static const auto R1        = Btn_R1();
+  static const auto L2        = Btn_L2();
+  static const auto R2        = Btn_R2();
+  static const auto Select    = Btn_SELECT();
+  static const auto Start     = Btn_START();
+
+  static const auto dpad = Dpad(&socd_strategies::allNeutral);
+};
+
+
+
+namespace all
+{
+  // Simplify adding/removing buttons by putting them into array
+  namespace _raw_array
+  {
+    using namespace buttons_storage;
+    // Add button pointers to this array
+    constexpr HidReportable* _buttons[] = 
+    {
+      &X,
+      &Square,
+      &Sircle,
+      &Triangle,
+      &L1,
+      &R1,
+      &L2,
+      &R2,
+      &Select,
+      &Start,
+      &dpad
+    };
+  };
+  // Just use buttons array for initialization
+  constexpr _inner::MyArray<HidReportable> buttons = {_raw_array::_buttons, _inner::array_size(_raw_array::_buttons)};
+};
+
+static const Gamepad g_gamepad = {};
+
+void setup()
+{
+#   ifndef BUILD_SIMULATOR_NOUSB
+    static HIDSubDescriptor node(hidReportDescriptor, sizeof(hidReportDescriptor));
+    HID().AppendDescriptor(&node);
+#   else
+    Serial.begin(115200); // Any baud rate should work
+    debugPrintf("Serail Initialized!\n");
+#   endif
+    
+    g_gamepad.appendMultiple(all::buttons);
+    g_gamepad.initChain();
+}
+
+void loop()
+{
+  g_gamepad.pollEverything();
 }
