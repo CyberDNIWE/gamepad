@@ -2,16 +2,16 @@
 // Just coment out defines like DEBUG_PRINT_ENABLED to remove ALL printouts (suggested for final build)
 // Or each individual DEBUG_PRINT_XXXXX to remove specific ones. (useful for debugging)
 
-#define BUILD_SIMULATOR_NOUSB
-#define DEBUG_PRINT_ENABLED BUILD_SIMULATOR_NOUSB
+//#define BUILD_SIMULATOR_NOUSB
+//#define DEBUG_PRINT_ENABLED BUILD_SIMULATOR_NOUSB
 //#define BEBUG_PRINT_BUTTONS 
 //#define DEBUG_PRINT_BUTTONS_RELEASED
 //#define BEBUG_PRINT_DEBOUNCE_STATE 
 //#define BEBUG_PRINT_DPAD 
-#define DEBUG_PRINT_USB_REPORT 
+//#define DEBUG_PRINT_USB_REPORT 
 //#define DEBUG_PRINT_SOCD
 
-#ifdef BUILD_SIMULATOR_NOUSB
+#ifndef BUILD_SIMULATOR_NOUSB
   #include <HID.h>
 #endif
 
@@ -50,13 +50,13 @@
 #   define debugPrintf_BUTTONS_RELEASED(str) REMOVED_FROM_SOURCE
 # endif
 #else
-# define debugPrintf(str)            REMOVED_FROM_SOURCE
-# define debugPrintf_BUTTONS(str)    REMOVED_FROM_SOURCE
-# define debugPrintf_DEBOUNCE(str)   REMOVED_FROM_SOURCE
-# define debugPrintf_DPAD(str)       REMOVED_FROM_SOURCE
-# define debugPrintf_USB(str)        REMOVED_FROM_SOURCE
-#define  debugPrintf_SOCD(str)       REMOVED_FROM_SOURCE
-#define debugPrintf_BUTTONS_RELEASED REMOVED_FROM_SOURCE
+# define debugPrintf(str)                  REMOVED_FROM_SOURCE
+# define debugPrintf_BUTTONS(str)          REMOVED_FROM_SOURCE
+# define debugPrintf_DEBOUNCE(str)         REMOVED_FROM_SOURCE
+# define debugPrintf_DPAD(str)             REMOVED_FROM_SOURCE
+# define debugPrintf_USB(str)              REMOVED_FROM_SOURCE
+# define  debugPrintf_SOCD(str)            REMOVED_FROM_SOURCE
+# define debugPrintf_BUTTONS_RELEASED(str) REMOVED_FROM_SOURCE
 #endif
  
 // Default debounce amount in ms
@@ -82,8 +82,8 @@ namespace board_config
     PIN_TRIANGLE  = 8,
     PIN_SQUARE    = 9,
     PIN_L1        = 10,
-    // For Mini Pro:
-    /*
+    // For Pro Micro:
+    //*
     PIN_L2        = 14,
     PIN_R1        = 16,
     PIN_R2        = 15,
@@ -92,7 +92,7 @@ namespace board_config
     //*/
     
     // For UNO:    
-    ///*
+    /*
     PIN_L2        = 11,
     PIN_R1        = 12,
     PIN_R2        = 13,
@@ -416,87 +416,11 @@ class iInitable
     virtual void init() noexcept = 0;
 };
 
-template<typename PT, typename RT>
-class Node : public iInitable
-{
-  public:
-    constexpr Node() noexcept = default;
-
-    
-    virtual ~Node() noexcept = default;
-    //{
-      //del();
-    //}
-
-    //virtual void init() noexcept = 0;
-    virtual void gather(RT& target) const noexcept = 0;
-
-    virtual void initChain() noexcept
-    {
-      //debugPrintf("Init")
-      init();
-      if(m_next)
-      {
-        //debugPrintf("Initing next chain!")
-        m_next->initChain();
-      }
-    }
-
-    void advance(RT& rep) const noexcept
-    {
-      if(m_next)
-      {
-        m_next->gather(rep);
-      }
-    }
-
-    PT* append(PT* next) noexcept
-    {
-      if(next)
-      {
-        if(m_next)
-        {
-          m_next->append(next);
-          //debugPrintf("Appended TO next.")
-        }
-        else
-        {
-          m_next = { next };
-          //debugPrintf("Appended AS next.")
-        }
-      }
-      return this;
-    }
-
-    template<typename ARR>
-    inline void appendMultiple(const ARR& arr) noexcept
-    {
-      for(size_t i = 0; i < arr.size; ++i)
-      {
-        PT* cur = arr.data[i];
-        if(cur)
-        {
-          append(cur);
-        }
-      }
-    }
-  protected:
-    inline void del() noexcept
-    {
-      if(m_next)
-      {
-        delete m_next;
-      }
-    }
-
-    PT* m_next = nullptr;
-};
-
-class HidReportable : public Node<HidReportable, hid_report_t>, public iGatherableANDiReportable
+class HidReportable : public iGatherableANDiReportable, public iInitable
 {
   public:
     constexpr HidReportable() noexcept = default;
-    constexpr HidReportable(bool updates) noexcept:  Node<HidReportable, hid_report_t>(), m_updateIsNeeded(updates)
+    constexpr HidReportable(bool updates) noexcept : m_updateIsNeeded(updates)
     {}
 
     virtual ~HidReportable() = default;
@@ -507,7 +431,6 @@ class HidReportable : public Node<HidReportable, hid_report_t>, public iGatherab
       {
         reportTo(target);
       }
-      advance(target);
     }
 
     virtual bool updateIsNeeded() const noexcept 
@@ -560,7 +483,7 @@ class Debouncer
     constexpr Debouncer(unsigned long debounceTime) noexcept : m_debounceTime(debounceTime)
     {}    
 
-    bool debounce(bool actuallyPressed) noexcept
+    bool debounce(bool actuallyPressed) const noexcept
     {
       auto now = getTimeSinceStart();
       bool timespanEnded = isResponsive(now);
@@ -669,9 +592,9 @@ class Debouncer
       return current > (m_pressTime + m_debounceTime);
     }
 
-    STATE m_debouncePhase              = STATE::RESET;
-    const unsigned long m_debounceTime = 0;
-    unsigned long m_pressTime          = 0;
+    mutable STATE m_debouncePhase        = STATE::RESET;
+    const unsigned long m_debounceTime   = 0;
+    mutable unsigned long m_pressTime    = 0;
 };
 
 class ButtonDebounced : public ButtonBase
@@ -707,12 +630,12 @@ namespace cleaner_strategy
 {
   struct SOCD_CleaningStrategy
   {
-    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept = 0;
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) const noexcept = 0;
   };
 
   struct None : public SOCD_CleaningStrategy
   {
-    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept 
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) const noexcept 
     {
       debugPrintf_SOCD("NO SOCD APPLIED!");
     };
@@ -720,7 +643,7 @@ namespace cleaner_strategy
 
   struct TournamentLegal : public SOCD_CleaningStrategy
   {
-    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept override
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) const noexcept override
     {
       if(up && down)
       {        
@@ -737,7 +660,7 @@ namespace cleaner_strategy
 
   struct AllNeutral : public SOCD_CleaningStrategy
   {
-    virtual void clean(bool& up, bool& down, bool& left, bool& right) noexcept override
+    virtual void clean(bool& up, bool& down, bool& left, bool& right) const noexcept override
     {      
       if(up && down)
       {        
@@ -756,7 +679,7 @@ namespace cleaner_strategy
 };
 
 
-#define _DPAD_CTOR_PARAMS cleaner_strategy::SOCD_CleaningStrategy* cleaner = &Dpad::noCleaning, \
+#define _DPAD_CTOR_PARAMS const cleaner_strategy::SOCD_CleaningStrategy* cleaner = &Dpad::noCleaning, \
 enPinsBUTTONS pin_up = enPinsBUTTONS::PIN_UP,       unsigned long btn_up_debuonceMs    = DEBOUNCE_DEFAULT_MS, \
 enPinsBUTTONS pin_down = enPinsBUTTONS::PIN_DOWN,   unsigned long btn_down_debuonceMs  = DEBOUNCE_DEFAULT_MS, \
 enPinsBUTTONS pin_left = enPinsBUTTONS::PIN_LEFT,   unsigned long btn_left_debuonceMs  = DEBOUNCE_DEFAULT_MS, \
@@ -766,7 +689,7 @@ enPinsBUTTONS pin_right = enPinsBUTTONS::PIN_RIGHT, unsigned long btn_right_debu
 class Dpad : public HidReportable
 {
   public:
-    const static cleaner_strategy::None noCleaning = {};
+    const static cleaner_strategy::None noCleaning;
 
     constexpr Dpad(_DPAD_CTOR_PARAMS) noexcept : HidReportable(),
     m_btn_up(pin_up, btn_up_debuonceMs),       m_btn_down(pin_down, btn_down_debuonceMs),
@@ -776,18 +699,18 @@ class Dpad : public HidReportable
 
     virtual void init() noexcept override
     {
-      m_btn_up.initChain();
-      m_btn_down.initChain();
-      m_btn_left.initChain();
-      m_btn_right.initChain();
+      m_btn_up.init();
+      m_btn_down.init();
+      m_btn_left.init();
+      m_btn_right.init();
     }
 
   protected:
+    Btn_Dpad                     m_btn_up;
+    Btn_Dpad                     m_btn_down;
+    Btn_Dpad                     m_btn_left;
+    Btn_Dpad                     m_btn_right;
     const cleaner_strategy::SOCD_CleaningStrategy*  m_cleaner;
-    const Btn_Dpad                     m_btn_up;
-    const Btn_Dpad                     m_btn_down;
-    const Btn_Dpad                     m_btn_left;
-    const Btn_Dpad                     m_btn_right;
   
     virtual void reportTo(hid_report_t& target) const noexcept override
     {
@@ -855,6 +778,8 @@ class Dpad : public HidReportable
 
     }
 };
+const cleaner_strategy::None Dpad::noCleaning = {};
+
 #undef _DPAD_CTOR_PARAMS
 
 //========== Concrete buttons ==============//
@@ -1124,36 +1049,56 @@ class Btn_START : public ButtonDebounced
 #pragma endregion
 //==========================================//
 
-class Root : public Node<HidReportable, hid_report_t>, public iGatherable
+template<typename ARR>
+struct Root
 {
   public:
-    constexpr Root() noexcept = default;
-
-    virtual void init() noexcept override
+    constexpr Root(const ARR& arr) noexcept : m_arr(arr)
     {};
-    
-    virtual void gather(hid_report_t& target) const noexcept override
+
+    void init() const noexcept
     {
-      advance(target);
+      for(size_t i = 0; i < m_arr.size; ++i)
+      {
+        m_arr.data[i]->init();
+      }
+    };
+    
+    void gather(hid_report_t& target) const noexcept
+    {
+      for(size_t i = 0; i < m_arr.size; ++i)
+      {
+        m_arr.data[i]->gather(target);
+      }
     }
+
+//  protected:
+    const ARR& m_arr;
 };
 
-class Gamepad : public Root
+template<typename ARR>
+struct _Gamepad : public Root<ARR>
 {
   public:
-    constexpr Gamepad() noexcept : m_usbReporter()
+    constexpr _Gamepad(const ARR& arr) noexcept : Root<ARR>(arr), m_usbReporter()
     {}
 
-    void pollEverything() const noexcept
+    void pollEverything() noexcept
     {
-      gather(m_usbReporter.getReportBuffer());
+      this->gather(m_usbReporter.getReportBuffer());
       m_usbReporter.sendReportIfNeeded();
     }
 
-  protected:
+//  protected:
     Reporter m_usbReporter;
 
 };
+
+template<typename ARR>
+constexpr _Gamepad<ARR> Gamepad(const ARR& buttons) noexcept
+{
+  return _Gamepad<ARR>(buttons);
+}
 
 
 
@@ -1163,7 +1108,7 @@ namespace socd_strategies
 {
   using namespace cleaner_strategy;
   static const cleaner_strategy::AllNeutral allNeutral = {};
-  static const cleaner_strategy::TournamentLegal tournamentLegal = {};
+  static constexpr cleaner_strategy::TournamentLegal tournamentLegal = {};
 
   /*
   constexpr SOCD_CleaningStrategy* _strategies[] PROGMEM = 
@@ -1187,8 +1132,7 @@ namespace buttons_storage
   static const auto R2        = Btn_R2();
   static const auto Select    = Btn_SELECT();
   static const auto Start     = Btn_START();
-
-  static const auto dpad = Dpad(&socd_strategies::allNeutral);
+  static const auto dpad      = Dpad(&socd_strategies::allNeutral);
 };
 
 
@@ -1200,7 +1144,7 @@ namespace all
   {
     using namespace buttons_storage;
     // Add button pointers to this array
-    constexpr HidReportable* _buttons[] = 
+    static const HidReportable* _buttons[] = 
     {
       &X,
       &Square,
@@ -1215,24 +1159,25 @@ namespace all
       &dpad
     };
   };
+
   // Just use buttons array for initialization
-  constexpr _inner::MyArray<HidReportable> buttons = {_raw_array::_buttons, _inner::array_size(_raw_array::_buttons)};
+  static constexpr _inner::MyArray<HidReportable> buttons = {_raw_array::_buttons, _inner::array_size(_raw_array::_buttons)};
 };
 
-static const Gamepad g_gamepad = {};
+static auto g_gamepad = Gamepad(all::buttons);
 
 void setup()
 {
 #   ifndef BUILD_SIMULATOR_NOUSB
     static HIDSubDescriptor node(hidReportDescriptor, sizeof(hidReportDescriptor));
     HID().AppendDescriptor(&node);
-#   else
+#   endif
+#   ifdef DEBUG_PRINT_ENABLED
     Serial.begin(115200); // Any baud rate should work
     debugPrintf("Serail Initialized!\n");
 #   endif
-    
-    g_gamepad.appendMultiple(all::buttons);
-    g_gamepad.initChain();
+
+    g_gamepad.init();
 }
 
 void loop()
